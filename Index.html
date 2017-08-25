@@ -1,0 +1,349 @@
+
+<!doctype><html><head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Odyssey.js Scroll</title>
+  <meta name="description" content="">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="icon" type="image/x-icon" href="http://cartodb.github.io/odyssey.js/sandbox/favicon.png">
+  <link rel="icon" type="image/png" href="http://cartodb.github.io/odyssey.js/sandbox/favicon.png">
+
+  <link rel="stylesheet" href="http://cartodb-libs.global.ssl.fastly.net/cartodb.js/v3/themes/css/cartodb.css">
+  <link rel="stylesheet" href="http://cartodb.github.io/odyssey.js/sandbox/css/scroll.css">
+  <script src="http://cartodb.github.io/odyssey.js/vendor/modernizr-2.6.2.min.js"></script>
+</head>
+<body>
+  <div id="layout">
+    <!--<div class="progress-bar"></div>-->
+
+    <div class="inner-header">
+      <div id="header"></div>
+    </div>
+
+    <div id="map_pos">
+      <div id="map_container">
+        <div id="map"></div>
+      </div>
+    </div>
+
+    <div id="content"></div>
+
+    <div id="credits">
+      <span class="title" id="title">Title</span>
+      <span class="author"><b id="author">By Name using</b> <a href="#">Odyssey.js</a><span>
+    </span></span></div>
+  </div> <!-- layout -->
+
+  <script src="http://cartodb-libs.global.ssl.fastly.net/cartodb.js/v3/cartodb.js"></script>
+  <script src="http://cartodb.github.io/odyssey.js/dist/odyssey.js" charset="UTF-8"></script>
+
+  <script>
+    O.Template({
+      init: function() {
+        var baseurl = this.baseurl = 'http://{s}.api.cartocdn.com/base-light/{z}/{x}/{y}.png';
+        var map = this.map = L.map('map',{
+          center: [0, 0],
+          zoom: 4
+        });
+
+        this.map.scrollWheelZoom.disable();
+
+        var basemap = this.basemap = L.tileLayer(baseurl, {
+          attribution: 'data OSM - map CartoDB'
+        }).addTo(map);
+
+        var story = O.Story()
+
+        this.story = story;
+        this.miniprogressbar = O.MiniProgressBar();
+
+        // trigger when  map_pos go out of the screen
+        this.edge = O.Edge(
+          O.Triggers.Scroll().less('map_pos').offset(0),
+          O.Triggers.Scroll().greater('map_pos').offset(0)
+        )
+      },
+
+      update: function(actions) {
+        var self = this;
+
+        this.story.clear();
+
+        if (this.baseurl && (this.baseurl !== actions.global.baseurl)) {
+          this.baseurl = actions.global.baseurl || 'http://0.api.cartocdn.com/base-light/{z}/{x}/{y}.png';
+
+          this.basemap.setUrl(this.baseurl);
+        }
+
+        if (this.cartoDBLayer && ("http://"+self.cartoDBLayer.options.user_name+".cartodb.com/api/v2/viz/"+self.cartoDBLayer.options.layer_definition.stat_tag+"/viz.json" !== actions.global.vizjson)) {
+          this.map.removeLayer(this.cartoDBLayer);
+
+          this.cartoDBLayer = null;
+          this.created = false;
+        }
+
+        if (actions.global.vizjson && !this.cartoDBLayer) {
+          if (!this.created) { // sendCode debounce < vis loader
+            cdb.vis.Loader.get(actions.global.vizjson, function(vizjson) {
+              self.map.fitBounds(vizjson.bounds);
+
+              cartodb.createLayer(self.map, vizjson)
+                .done(function(layer) {
+                  self.cartoDBLayer = layer;
+
+                  var sublayer = layer.getSubLayer(0),
+                      layer_name = layer.layers[0].options.layer_name,
+                      filter = actions.global.cartodb_filter ? " WHERE "+actions.global.cartodb_filter : "";
+
+                  sublayer.setSQL("SELECT * FROM "+layer_name+filter)
+
+                  self.map.addLayer(layer);
+
+                  self._resetActions(actions);
+                }).on('error', function(err) {
+                  console.log("some error occurred: " + err);
+                });
+            });
+
+            this.created = true;
+          }
+
+          return;
+        }
+
+        this._resetActions(actions);
+      },
+
+      _resetActions: function(actions) {
+        // update footer title and author
+        var title_ = actions.global.title === undefined ? '' : actions.global.title,
+            author_ = actions.global.author === undefined ? 'Using' : 'By '+actions.global.author+' using';
+
+        document.getElementById('title').innerHTML = title_;
+        document.getElementById('author').innerHTML = author_;
+        document.title = title_ + " | " + author_ +' Odyssey.js';
+
+        var TRIGGER_LINE = this.map.getSize().y + 50;
+        this.story.addEvent(
+          this.edge,
+          O.Parallel(
+            O.Actions.CSS($('#map_container')).toggleClass('attachTop'),
+            O.Actions.CSS($('#content')).toggleClass('attachMap'),
+            O.Actions.Debug().log('attach')
+          )
+        )
+
+        // create content
+        var content = '';
+
+        var slide_ = actions[0];
+        $('#header').html(slide_.html());
+
+        this.story
+          .addState(
+            O.Scroll().within($('#header')),
+            slide_(this)
+          );
+
+        for(var i = 1; i < actions.length; ++i) {
+          var slide = actions[i];
+          content += "<div id='s_" + i +"'>" + slide.html() + "</div>";
+        }
+
+        $('#content').html(content);
+
+        // first slide is the header, skip it
+        for(var i = 1; i < actions.length; ++i) {
+          var slide = actions[i];
+          this.story.addState(
+            O.Triggers.Scroll().within('s_' + i).offset(TRIGGER_LINE),
+            O.Parallel(
+              slide(this),
+              this.miniprogressbar.percent(100*i/(actions.length - 1))
+            )
+          )
+        }
+
+        if(window.scrollY === 0) {
+          this.story.go(0);
+        }
+      }
+    });
+  </script>
+
+  <script>
+    (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+    (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+    m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+    })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+    ga('create', 'UA-20934186-21', 'cartodb.github.io');
+    ga('send', 'pageview');
+  </script>
+
+
+<script id="md_template" type="text/template">```
+-baseurl: "https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/256/{z}/{x}/{y}?access_token=pk.eyJ1IjoicGFjaWZpY29kayIsImEiOiJjajZucXBna24wYXIyMnJxczN1NTd3M2I4In0.nKNEe0bfJf5q4HBoASBF3A"
+-title: ""
+-author: "SuperTours"
+-vizjson: " https://carstenkring.carto.com/api/v2/viz/31c54c84-6083-4a42-bf87-0edc8cdceda8/viz.json"
+```
+# Umbozha - Queen of Africa
+```
+- center: [-21.1255, 29.0479]
+- zoom: 4
+```
+
+Albatros' eventyrrejse til Afrikas hjerte skal vi opleve flere safarier i Zimbabwes bedste nationalpark, Hwange, der tæller mange sjældne arter som brun hyæne, oryx og vildhund. Vi skal også besøge de berømte Victoria Falls og på aftensejlads på Zambezi samt på landsbybesøg. 
+
+Derudover byder rejsen på fire dages krydstogt på den naturskønne Kariba sø, som er dannet af den opdæmmede Zambeziflod og omgivet af savanne og skov med Afrikas kendte vildt. Her sejler vi med den nybyggede luksusyacht Umbozha.
+
+# Dag 1. Afrejse fra København
+```
+- center: [55.6282, 12.6506]
+- zoom: 12
+```
+
+Afrejse fra Danmark med ankomst
+til Johannesburg næste dag.
+
+# Dag 2 - Ankomst til Johannesburg. Pretoria-tur. Zebra Lodge. Velkomstmiddag
+```
+- center: [-25.7603, 28.3640]
+- zoom: 8
+```
+
+Fra Johannesburg går turen mod
+nordøst til Pretoria, Sydafrikas
+oprindelige hovedstad, hvor
+regering og parlament holder til
+halvdelen af året. Den anden
+halvdel foregår i Cape Town.
+Byrundturen går blandt andet til
+den smukke regeringsbygning,
+Union Building. Den
+halvmåneformede bygning, som er
+opført i lys sandsten, er højt
+beliggende med en storslået udsigt
+over hele byen. Bygningen stod
+færdig i 1913, og de to lange fløje var
+tænkt som symbol på landets to
+væsentlige befolkningsgrupper,
+ikke-sorte og hvide, sidstnævnte var
+englændere og boere, der netop
+havde bekriget hinanden i den
+blodige boerkrig. Den sorte del af
+befolkningen indgik ikke i den slags
+overvejelser.
+
+![](https://upload.wikimedia.org/wikipedia/commons/thumb/3/35/Panoramic_View_Of_The_Union_Building_Pretoria%2C_South_Africa.jpg/640px-Panoramic_View_Of_The_Union_Building_Pretoria%2C_South_Africa.jpg)
+
+Der bliver tid til frokost (ikke
+inkluderet), og efter den lille tur i
+Pretoria kører vi til Albatros' hotel,
+Zebra Lodge, som er en halv times
+kørsel herfra. Zebra Lodge ligger i et
+lille fredfyldt reservat, hvor
+savannevildtet går frit omkring, og
+man har mulighed for at gå lidt
+rundt på egen hånd med kameraet i
+hånden. Først på aftenen mødes vi
+til fælles velkomstmiddag.
+
+# Dag 3. Johannesburg til Victoria Falls, Zimbabwe. Solnedgangskrydstogt på Zambezifloden
+```
+- center: [-17.9182, 25.8456]
+- zoom: 14
+```
+Efter morgenmaden kører vi retur til
+Johannesburgs lufthavn og fortsætter til Victoria Falls på grænsen mellem Botswana,
+Zambia og Zimbabwe. Hen på eftermiddagen efter indkvartering på hotellet går turen
+videre til Zambezi, en af Afrikas største og mest vandrige floder, der er denne rejses omdrejningspunkt. Vi sejler ud på et såkaldt sundowner-cruise oven for Victoriafaldene. En kølig drink kan nydes på dækket, mens flodbåden flyder langs de skovklædte bredder. Måske viser en flodhest eller krokodille sig i det urolige vand.
+
+```
+
+```
+# Dag 4. Victoria Falls. Oplevelser på egen hånd og vandretur til vandfaldene 
+```
+- center: [-17.9249, 25.8546]
+- zoom: 16
+```
+Zimbabwes største attraktion er Victoria-vandfaldene, navngivet af David Livingstone efter dronning Victoria af Storbritannien. På det lokale bantu-sprog hedder faldene Mosi o Tunya, hvilket betyder noget i retning af “Røgen, der tordner”. En ret præcis beskrivelse af det inferno af larmende vandmasser, der først styrter 108 meter ned i dybet, for derefter at hvirvles og blæses flere hundrede meter op og ende som regn over den lille, grønne regnskov, der omgiver faldene. Dagen begynder med en tur til de berømte vandfald. Blandt klodens talrige smukke vandfald er Victoria Falls noget ganske særligt; dobbelt så høje og halvanden gang så brede som Niagara Falls på grænsen mellem USA og Canada. I den fuglerige regnskov ses blandt andet kæmpe næsehornsfugle, frække aber og indimellem bushbuk, vandbuk og vortesvin. Vi går omkring faldene, hvor det ene storslåede syn afløser det andet,
+mens solens stråler ses som regnbuer i faldenes millioner af vanddråber.  Vandet slår ofte op i vældige kaskader, så en paraply eller et regnslag samt vandtæt pose til kamera er godt at have ved hånden.
+Eftermiddagen er fri til eventyr på egen hånd, og der er mange oplevelsesmuligheder i området. Tag for eksempel med på en safari eller oplev Victoria Falls i fugleperspektiv på en flyvetur hen over området. Riverrafting på Zambezifloden er også en spændende oplevelse, som giver dig mulighed for at se området fra en ny side. Men der er formentlig også nogle, der ikke kan blive færdige med faldene på en halv dag
+```
+# Dag 5. Victoria Falls – Hwange National Park.
+```
+- center: [-18.5004, 26.2958]
+- zoom: 7
+```
+Eftermiddagssafari
+
+Vi forlader Victoria Falls og kører ca. 250 km sydpå til Hwange Nationalpark, som både er en af de største vildtreservater i Zimbabwe og en af Afrikas bedste naturområder med en rig og varieret natur, der byder på savanne, skov, sandklitter, granitfremspring og vådområder. Her findes en stor koncentration af zebra, giraf, elefant, løve og talrige andre spektakulære arter som leopard og næsehorn, der desværre er meget truet, på trods af, at det er det eneste velbeskyttede område. Til gengæld er der gode muligheder for sjældne arter som oryx-gazelle og den brune hyæne. Desuden er bestanden af afrikansk vildhund en af de største i Afrika. Fuglelivet er utroligt artsrigt med over 400 registrerede arter. Eftermiddagen byder på den første safaritur efter indkvartering og frokost.
+
+
+# Dag 6. Safari i Hwange Nationalpark
+
+```
+- center: [-19.1971, 26.7599]
+- zoom: 8
+```
+Dagen er afsat til safarikørsel i Hwange. Vi følger de lokale rangers’ anvisninger i jagten på de sjældnere arter og snupper så ellers, hvad vi finder på vejen. Hwange er en af de vildtreservater, hvor man på et par dage næsten altid finder alle de kendteste arter suppleret med et par sjældenheder, omend næsehorn og leopard kan være meget vanskelige at finde.Dagen er afsat til safarikørsel i Hwange. Vi følger de lokale rangers’ anvisninger i jagten på de sjældnere arter og snupper så ellers, hvad vi finder på vejen. Hwange er en af de vildtreservater, hvor man på et par dage næsten altid finder alle de kendteste arter suppleret med et par sjældenheder,
+omend næsehorn og leopard kan være meget vanskelige at finde.
+
+
+# Dag 7. Hwange National park – Binga. Afrikansk kultur 
+```
+- center: [-17.7225, 26.7393]
+- zoom: 8
+```
+Vi forlader Hwange National Park. Det tager omkring tre timer at nå frem til Binga, hvor frokosten venter. Herefter starter dagens kulturelle besøg til Batonka Tribal museum, et kvindekooperativ samt en kurvefabrik. Det lokale Batonka eller Tonga-folk er en gren af de afrikanske bantustammer, som har slået sig ned her ved Binga og langs Kariba-søen for mange hundrede år siden.
+Der er i alt omkring 300.000 beboere omkring søens frugtbare opland. De lever hovedsageligt af selvforsyningslandbrug og de er derfor ret priviligerede i et samfund, som ellers lider af dårlig økonomi
+og hyperinflation.
+
+# Dag 8. Krydstogt med Umbozha, Lake Kariba
+```
+- center: [-17.3087, 27.6938]
+- zoom: 8
+```
+De næste fire dage sejler vi med Umbozha på og omkring Kariba-søen, en af Afrikas hemmelige naturperler. En enorm sø er opstået efter opdæmning af Zambezi-floden. Faktisk verdens største menneskeskabte sø. Søen og de vandførende flodarme er omgivet af skov og savanne, hvoraf en stor del er fredet som nationalpark. Vandet er fyldt med krokodiller og flodheste, som ses hver dag, samt den yndede sportsfisk, tigerfish. Fuglelivet er enestående, og vi kan dagligt iagttage den hvidhovede flodørn fiske i søen.
+Vi sejler langs den østlige side af søen til The Chete-safariområdet
+
+ved Matusadona National Park, hvor vi forventer at se en del vildt langs bredden. Her tager vi på en lille tur ad Sengwe-floden, der er særlig kendt for sit enestående fugleliv, og nyder naturen og måske en enkelt drink eller to fra all-inclusive baren på dækket. Lystfiskere kan kaste liner fra de medbragte tenderbåde efter tigerfish eller kæmpemaller. Hen på aftenen passerer vi den smukke Cheete-slugt og nyder den afrikanske stjernehimmel langt fra byens støv og forurening.
+
+# Dag 9. Krydstogt på Kariba. Safari i Matusadonna National Park
+```
+- center: [-16.8584, 28.7038]
+- zoom: 10
+```
+Vi er i løbet af natten sejlet til The Bumi Basin, grænsende til Matusadonna National Park. Her er der frit slag til at nyde livet på dækket, udforske området i en af de
+to mindre både og komme rigtig tæt på såvel fugle som storvildt eller snuppe en tur i Matusadona National Park til fods eller i safaribil.
+Beliggende på den sydlige bred af Lake Kariba er den ellers utilgængelige nationalpark nu åben for sejlende, og søen har skabt store, nye græsningsområder, der tiltrækker det græssende savannevildt som elefant, bøffel og zebra, der forekommer i store mængder, sammen med deres naturlige fjender. Vi forlader båden, når tusmørket falder på, og indtager middagen ved bålet på en sandbanke. Her får vi det fulde udbytte af nattens lyde blandet med bålets knitren. 
+
+
+# Dag 10. Krydstogt til Sampa Kuruma/Antilope Ø 
+```
+- center: [-16.6980, 28.7615]
+- zoom: 10
+```
+Der er tid til lidt aktivtet for de
+morgenfriske, inden vi letter anker og krydser 5-6 timer over søen til Sampa Kuruma eller Antelope Island. Hen på eftermiddagen tager vi en tur med de små tenderbåde og snupper en ”sundowner” på søen.
+
+# Dag 11. Krydstogt til Kariba havn. Kariba Dam, Chinoyi Caves videre til Pamuzinda Safari Lodge og afskedsmiddag 
+```
+- center: [-16.5470, 28.8032]
+- zoom: 12
+```
+Efter dagens morgenaktivitet og sene brunch sejler vi til Kariba Harbour og kører herfra til Kariba Dam Wall, der deler Zimbabwe og Zambia. Den er 128 meter høj og 579 meter bred. Et imponerende bygningsværk, der blev påbegyndt i 1955 og reelt først blev færdigt i 1977 og kostede 85 arbejdere livet undervejs.
+Herefter fortsættes til Chinoyi Caves og videre til Pamuzinda Safari Lodge. En enestående tur på verdens største kunstige sø slutter med en hyggelig afskedsmiddag og sammenkomst ved bålet og måske en sidste nightcap.
+
+# Dag 12. Morgen-safarivandring, transfer til Harare lufthavn og hjemrejse 
+```
+- center: [-17.6754, 30.3854]
+- zoom: 8
+```
+Vi har god tid om morgenen til en sidste bushwalk eller kanotur, inden vi kører tilbage til Harare og påbegynder hjemrejsen.
+
+# Dag 13. Ankomst til København
+</script></body></html>
